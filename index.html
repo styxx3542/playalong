@@ -127,10 +127,18 @@
     font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
     font-size: var(--tabfont, 14px); line-height: 1.35;
     margin-bottom: 10px;
+    padding-top: 1.7em;                 /* room for floating chord-name labels */
     border-radius: 6px;
     user-select: none;
   }
   .col { display: flex; flex-direction: column; position: relative; cursor: pointer; }
+  .col .chord-name {
+    position: absolute; bottom: 100%; left: 0; margin-bottom: 3px;
+    font-size: 11px; font-weight: 700; line-height: 1;
+    color: var(--accent); white-space: nowrap; pointer-events: none;
+    font-family: -apple-system, system-ui, sans-serif;   /* break out of the monospace grid */
+  }
+  #tabScroll.no-chords .chord-name { display: none; }
   .col .c { width: 1ch; height: 1.35em; white-space: pre; color: #6b7484; text-align: center; }
   .col .c.note { color: var(--text); font-weight: 600; }
   .col .c.lbl { color: var(--muted); }
@@ -307,6 +315,7 @@
           <button class="ctl" id="countBtn" title="Play one bar of clicks before starting">Count-in</button>
           <button class="ctl" id="metroBtn" title="Metronome click on every beat during playback">Click</button>
           <button class="ctl" id="muteBtn" title="Mute the guitar sound — focus bar and click keep going">Mute 🎸</button>
+          <button class="ctl" id="chordBtn" title="Show detected chord names above the tab">Chords</button>
         </div>
         <div class="ctl-group" title="Volume">
           <span style="color:var(--muted);font-size:13px">🔊</span>
@@ -368,6 +377,82 @@ E|-------------|"></textarea>
 // MIDI note numbers for standard tuning, display order top→bottom: e B G D A E
 const TUNING = [64, 59, 55, 50, 45, 40];
 const STRING_NAMES = ["e", "B", "G", "D", "A", "E"];
+
+/* ============================== Chord detection ============================== */
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+// interval-set (relative to root, sorted, comma-joined) -> quality suffix
+const CHORD_TEMPLATES = {
+  "0,4,7": "", "0,3,7": "m", "0,3,6": "dim", "0,4,8": "aug",
+  "0,2,7": "sus2", "0,5,7": "sus4",
+  "0,4,7,9": "6", "0,3,7,9": "m6",
+  "0,4,7,10": "7", "0,4,7,11": "maj7", "0,3,7,10": "m7",
+  "0,3,6,10": "m7b5", "0,3,6,9": "dim7", "0,2,4,7": "add9", "0,5,7,10": "7sus4",
+  // Shell voicings (root + 3rd + 7th, 5th omitted) — common in riffs/fingerpicking
+  "0,3,10": "m7", "0,4,10": "7", "0,4,11": "maj7",
+};
+
+// distinct pitch classes (0-11) of the pitched (non-muted) notes in a column
+function pitchClasses(notes) {
+  const pcs = new Set();
+  for (const n of notes) if (!n.mute && n.fret >= 0) pcs.add(((TUNING[n.string] + n.fret) % 12 + 12) % 12);
+  return pcs;
+}
+
+// Name a single full voicing, or null if it's not a recognizable chord.
+function detectChord(notes) {
+  const pitched = notes.filter(n => !n.mute && n.fret >= 0);
+  if (pitched.length < 3) return null;                 // a chord needs 3+ sounded notes
+  const midis = pitched.map(n => TUNING[n.string] + n.fret);
+  const bassPc = Math.min(...midis) % 12;
+  const pcs = [...pitchClasses(notes)].sort((a, b) => a - b);
+
+  if (pcs.length === 2) {                              // power chord (root+fifth, octave-doubled)
+    const iv = (pcs[1] - pcs[0] + 12) % 12;
+    if (iv === 7) return NOTE_NAMES[pcs[0]] + "5";
+    if (iv === 5) return NOTE_NAMES[pcs[1]] + "5";
+    return null;
+  }
+  if (pcs.length < 3) return null;
+
+  const pcSet = new Set(pcs);
+  const roots = [bassPc, ...pcs.filter(p => p !== bassPc)]; // bass first -> root-position names plainly
+  for (const root of roots) {
+    const key = [...pcSet].map(p => ((p - root) + 12) % 12).sort((a, b) => a - b).join(",");
+    const quality = CHORD_TEMPLATES[key];
+    if (quality !== undefined) {
+      let name = NOTE_NAMES[root] + quality;
+      if (root !== bassPc) name += "/" + NOTE_NAMES[bassPc]; // inversion / slash chord
+      return name;
+    }
+  }
+  return null;                                          // unknown shape -> no label
+}
+
+// Chord-chart labeling: walk each part's note columns in order, hold the current
+// chord, and set col.chordLabel only at genuine chord changes. A chord "onset" is a
+// strum that grips a bass-side string (D/A/low-E, index >= 3) with 3+ notes. Strums
+// that catch only the top strings (e/B/G) are upstroke partials, and single notes are
+// melodic plucks -- neither is an onset, so they leave the held chord unchanged.
+function computeChordLabels(song) {
+  for (const part of song.parts) {
+    let heldName = null;                               // reset per part
+    for (const block of part.blocks) {
+      for (const col of block.steps) {                 // note columns only, in order
+        col.chordLabel = null;                         // idempotent: clear any prior label
+        const pitched = col.notes.filter(n => !n.mute && n.fret >= 0);
+        const reachesBass = pitched.some(n => n.string >= 3); // D/A/low-E -> a full grip
+        if (pitched.length < 3 || !reachesBass) continue;     // pluck / upstroke partial -> hold
+        const name = detectChord(col.notes);
+        if (name && name !== heldName) {               // genuine chord change -> label the onset
+          col.chordLabel = name;
+          heldName = name;
+        }
+        // same chord restated -> no relabel; unnameable grip -> keep held chord
+      }
+    }
+  }
+}
 
 const TAB_LINE_RE = /^\s*([a-gA-G][#b]?)?\s*\|? *[|\-0-9hpbrsxX/\\~^().*=\s]*$/;
 // Optional strum-direction row above a block: s|v---^---| (v/d = down, ^/u = up)
@@ -678,6 +763,7 @@ const state = {
   countIn: localStorage.getItem("pa.countIn") !== "0",
   metro: localStorage.getItem("pa.metro") === "1",
   muteGuitar: localStorage.getItem("pa.muteGuitar") === "1",
+  showChords: localStorage.getItem("pa.showChords") !== "0",
   volume: +(localStorage.getItem("pa.volume") || 80),
   fontSize: +(localStorage.getItem("pa.fontSize") || 14),
   trainer: { armed: false, start: 60, step: 5, target: 100, savedBpm: null },
@@ -902,6 +988,12 @@ function renderSong() {
       for (const col of block.cols) {
         const colEl = document.createElement("div");
         colEl.className = "col" + (col.isBar ? " bar nostep" : "");
+        if (col.chordLabel) {
+          const cn = document.createElement("div");
+          cn.className = "chord-name";
+          cn.textContent = col.chordLabel;
+          colEl.appendChild(cn);
+        }
         if (block.hasStrum) {
           const c = document.createElement("div");
           c.className = "c strum" + (col.strum ? " arrow" : "");
@@ -1330,6 +1422,7 @@ function loadSong(song, file) {
   // Deep-ish reset of part state (parse result may be reused from the library cache)
   song.parts.forEach(p => { p.enabled = true; });
   state.song = song;
+  computeChordLabels(song);
   state.order = song.parts.map(p => p.id);
   state.loopPartId = null;
   state.loopSel = null;
@@ -1499,6 +1592,15 @@ $("muteBtn").addEventListener("click", e => {
   localStorage.setItem("pa.muteGuitar", state.muteGuitar ? "1" : "0");
   e.currentTarget.classList.toggle("toggled", state.muteGuitar);
   if (guitarBus) guitarBus.gain.setTargetAtTime(state.muteGuitar ? 0 : 1, ctx.currentTime, 0.01);
+});
+
+$("chordBtn").classList.toggle("toggled", state.showChords);
+tabScroll.classList.toggle("no-chords", !state.showChords);
+$("chordBtn").addEventListener("click", e => {
+  state.showChords = !state.showChords;
+  localStorage.setItem("pa.showChords", state.showChords ? "1" : "0");
+  e.currentTarget.classList.toggle("toggled", state.showChords);
+  tabScroll.classList.toggle("no-chords", !state.showChords);
 });
 
 $("volSlider").value = state.volume;
