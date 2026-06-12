@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PlayAlong — Guitar Tab Player</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎸</text></svg>">
+<style>
+  :root {
+    --bg: #16181d;
+    --panel: #1f232b;
+    --panel-2: #262b35;
+    --border: #343b48;
+    --text: #e8eaf0;
+    --muted: #9aa3b2;
+    --accent: #f5a524;
+    --accent-soft: rgba(245, 165, 36, 0.18);
+    --green: #4ade80;
+    --red: #f87171;
+    --focus-col: rgba(245, 165, 36, 0.28);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 18px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: 0.3px; }
+  header h1 span { color: var(--accent); }
+  #songTitle { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #songTitle b { color: var(--text); font-weight: 600; }
+
+  main { flex: 1 1 auto; display: flex; min-height: 0; }
+
+  /* ---------- Sidebar ---------- */
+  aside {
+    width: 270px;
+    flex: 0 0 auto;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  aside section { padding: 12px 14px; border-bottom: 1px solid var(--border); min-height: 0; }
+  aside h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 0 0 8px;
+  }
+  #library { overflow-y: auto; flex: 0 1 auto; }
+  #parts { overflow-y: auto; flex: 1 1 auto; }
+
+  .lib-item {
+    display: block; width: 100%; text-align: left;
+    background: none; border: 1px solid transparent; border-radius: 6px;
+    color: var(--text); padding: 7px 9px; cursor: pointer; font-size: 13px;
+  }
+  .lib-item:hover { background: var(--panel-2); }
+  .lib-item.active { background: var(--accent-soft); border-color: var(--accent); }
+  .lib-item small { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
+
+  .part-item {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; margin-bottom: 6px; font-size: 13px;
+    cursor: grab; user-select: none;
+  }
+  .part-item.dragging { opacity: 0.4; }
+  .part-item.drop-above { box-shadow: 0 -2px 0 var(--accent); }
+  .part-item.drop-below { box-shadow: 0 2px 0 var(--accent); }
+  .part-item.playing-part { border-color: var(--accent); }
+  .part-item.disabled-part .part-name { color: var(--muted); text-decoration: line-through; }
+  .part-item .grip { color: var(--muted); cursor: grab; font-size: 14px; }
+  .part-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .part-name small { color: var(--muted); }
+  .part-item button {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 14px; padding: 5px 6px; border-radius: 4px; line-height: 1;
+    min-width: 26px; min-height: 26px;
+  }
+  .part-item button:hover { color: var(--text); background: var(--border); }
+  .part-item button.loop-on { color: var(--accent); background: var(--accent-soft); }
+
+  .hint { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 6px 0 0; }
+
+  #pasteBtn {
+    width: 100%; padding: 7px; border-radius: 6px; cursor: pointer;
+    background: var(--panel-2); color: var(--text); border: 1px dashed var(--border);
+    font-size: 12px;
+  }
+  #pasteBtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------- Tab viewport ---------- */
+  #tabWrap { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #tabScroll {
+    flex: 1 1 auto; overflow: auto; padding: 18px 22px 80px;
+    --tabfont: 14px;
+    position: relative;
+  }
+  .section-label {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+    color: var(--accent); margin: 18px 0 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label:first-child { margin-top: 0; }
+  .section-label .badge {
+    font-size: 10px; color: var(--muted); font-weight: 400; letter-spacing: 0;
+    text-transform: none;
+  }
+  .block {
+    display: flex; flex-wrap: nowrap; width: max-content;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: var(--tabfont, 14px); line-height: 1.35;
+    margin-bottom: 10px;
+    border-radius: 6px;
+  }
+  .col { display: flex; flex-direction: column; position: relative; cursor: pointer; }
+  .col .c { width: 1ch; height: 1.35em; white-space: pre; color: #6b7484; text-align: center; }
+  .col .c.note { color: var(--text); font-weight: 600; }
+  .col .c.lbl { color: var(--muted); }
+  .col.bar .c { color: #4a5364; }
+  .col:hover { background: rgba(255,255,255,0.06); }
+  .col.playhead { background: var(--focus-col); border-radius: 2px; }
+  .col.playhead::after {
+    content: ""; position: absolute; left: 0; right: 0; top: -3px; height: 3px;
+    background: var(--accent); border-radius: 2px;
+  }
+  .col.playhead .c.note { color: var(--accent); }
+  .col.nostep { cursor: default; }
+  .col .c.strum { color: #4a5364; }
+  .col .c.strum.arrow { color: var(--accent); font-weight: 700; }
+
+  /* ---------- Transport ---------- */
+  #transport {
+    flex: 0 0 auto;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 10px 18px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #progress {
+    height: 14px; background: var(--panel-2); border-radius: 7px;
+    position: relative; cursor: pointer; overflow: hidden;
+  }
+  #progressFill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    background: linear-gradient(90deg, rgba(245,165,36,0.55), var(--accent));
+    border-radius: 7px;
+  }
+  .progress-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.13); }
+  .progress-part { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.35); }
+  #loopRegion {
+    position: absolute; top: 0; bottom: 0; display: none;
+    border: 1px solid var(--accent); border-radius: 7px;
+    background: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(245,165,36,0.18) 5px, rgba(245,165,36,0.18) 7px);
+    pointer-events: none;
+  }
+  #loopChip {
+    display: none; align-items: center; gap: 6px;
+    background: var(--accent-soft); border: 1px solid var(--accent); color: var(--accent);
+    border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 12px; white-space: nowrap;
+  }
+  #loopChip button {
+    background: none; border: none; color: var(--accent); cursor: pointer;
+    font-size: 13px; padding: 1px 6px; border-radius: 999px; line-height: 1;
+  }
+  #loopChip button:hover { background: var(--accent); color: #1a1304; }
+  #countOverlay {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    pointer-events: none; z-index: 40;
+  }
+  #countOverlay span {
+    font-size: 120px; font-weight: 800; color: var(--accent);
+    text-shadow: 0 4px 30px rgba(0,0,0,0.6); opacity: 0.92;
+  }
+  #pasteErr { color: var(--red); font-size: 12px; margin: 8px 0 0; display: none; }
+  .lib-group { display: flex; align-items: center; }
+  .lib-group .lib-item { flex: 1 1 auto; }
+  .lib-del {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    padding: 4px 6px; border-radius: 4px; font-size: 12px;
+  }
+  .lib-del:hover { color: var(--red); background: var(--panel-2); }
+
+  #controlsRow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .ctl-group { display: flex; align-items: center; gap: 8px; }
+
+  button.big {
+    background: var(--accent); color: #1a1304; border: none;
+    width: 46px; height: 46px; border-radius: 50%;
+    font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  button.big:hover { filter: brightness(1.1); }
+  button.ctl {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 11px; cursor: pointer; font-size: 13px;
+  }
+  button.ctl:hover { border-color: var(--accent); }
+  button.ctl.toggled { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  #tempoSlider { width: 180px; accent-color: var(--accent); }
+  #tempoVal {
+    font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 700; min-width: 110px;
+  }
+  #tempoVal small { color: var(--muted); font-weight: 400; font-size: 11px; }
+  #posLabel { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-left: auto; }
+
+  kbd {
+    background: var(--panel-2); border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 4px; padding: 0 5px; font-size: 11px; font-family: inherit;
+  }
+
+  /* ---------- Paste dialog ---------- */
+  dialog {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px; width: min(720px, 90vw);
+  }
+  dialog::backdrop { background: rgba(0,0,0,0.6); }
+  dialog textarea {
+    width: 100%; height: 300px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+  }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+
+  #toast {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 9px 16px; border-radius: 8px; font-size: 13px; display: none; z-index: 50;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Play<span>Along</span> 🎸</h1>
+  <div id="songTitle">No tab loaded</div>
+</header>
+
+<main>
+  <aside>
+    <section id="library">
+      <h2>Tab Library</h2>
+      <div id="libList"><p class="hint">Loading tabs…</p></div>
+      <button id="pasteBtn">+ Paste your own tab</button>
+    </section>
+    <section id="parts">
+      <h2>Parts <span style="color:var(--muted);font-weight:400;text-transform:none">(drag to reorder)</span></h2>
+      <div id="partList"></div>
+      <p class="hint">Drag or use ▲▼ to reorder. Click a name to jump there. ⟳ loops one part, ✕ skips it.</p>
+    </section>
+  </aside>
+
+  <div id="tabWrap">
+    <div id="tabScroll"></div>
+    <div id="transport">
+      <div id="progress"><div id="progressFill"></div><div id="loopRegion"></div></div>
+      <div id="controlsRow">
+        <div class="ctl-group">
+          <button class="big" id="playBtn" title="Play / Pause (Space)">▶</button>
+          <button class="ctl" id="stopBtn" title="Stop and rewind">⏹</button>
+        </div>
+        <div class="ctl-group">
+          <button class="ctl" id="tempoDown" title="Slower (↓)">−5</button>
+          <input type="range" id="tempoSlider" min="30" max="260" value="120">
+          <button class="ctl" id="tempoUp" title="Faster (↑)">+5</button>
+          <div id="tempoVal">120 BPM <small>(100%)</small></div>
+          <button class="ctl" id="tempoReset" title="Reset to the tab's written tempo">Reset</button>
+        </div>
+        <div class="ctl-group">
+          <button class="ctl toggled" id="loopBtn" title="Loop the whole song">Loop ⟳</button>
+          <span id="loopChip"><span id="loopChipText"></span><button id="loopChipClear" title="Release the part loop">✕</button></span>
+          <button class="ctl" id="countBtn" title="Play one bar of clicks before starting">Count-in</button>
+        </div>
+        <div class="ctl-group" title="Volume">
+          <span style="color:var(--muted);font-size:13px">🔊</span>
+          <input type="range" id="volSlider" min="0" max="100" value="80" style="width:80px;accent-color:var(--accent)">
+        </div>
+        <div class="ctl-group" title="Tab text size">
+          <button class="ctl" id="fontDown" title="Smaller tab text">A−</button>
+          <button class="ctl" id="fontUp" title="Bigger tab text">A+</button>
+        </div>
+        <div id="posLabel">– / –</div>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">
+        <kbd>Space</kbd> play/pause &nbsp; <kbd>←</kbd><kbd>→</kbd> previous/next measure &nbsp; <kbd>↑</kbd><kbd>↓</kbd> tempo ±5 &nbsp; click anywhere in the tab to jump
+      </div>
+    </div>
+  </div>
+</main>
+
+<dialog id="pasteDlg">
+  <h3 style="margin-top:0">Paste a guitar tab</h3>
+  <p class="hint" style="margin-bottom:8px">
+    Standard ASCII tab: six lines per block (e B G D A E), frets as numbers, <code>|</code> barlines.
+    Optional header lines: <code>Title:</code>, <code>Tempo:</code>, <code>Subdivision:</code> (columns per beat, default 4).
+    Name sections with <code>[Intro]</code>-style lines.
+  </p>
+  <textarea id="pasteArea" placeholder="Title: My riff
+Tempo: 120
+
+[Riff]
+e|-------------|
+B|-------------|
+G|---------2---|
+D|---0--2------|
+A|-3-----------|
+E|-------------|"></textarea>
+  <p id="pasteErr"></p>
+  <div class="row">
+    <button class="ctl" id="pasteCancel">Cancel</button>
+    <button class="ctl" id="pasteLoad" style="background:var(--accent);color:#1a1304;border:none">Save &amp; load tab</button>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+<div id="countOverlay"><span></span></div>
+
+<script>
+"use strict";
+
+/* ============================== Tab parsing ============================== */
+
+// MIDI note numbers for standard tuning, display order top→bottom: e B G D A E
+const TUNING = [64, 59, 55, 50, 45, 40];
+const STRING_NAMES = ["e", "B", "G", "D", "A", "E"];
+
+const TAB_LINE_RE = /^\s*([a-gA-G][#b]?)?\s*\|? *[|\-0-9hpbrsxX/\\~^().*=\s]*$/;
+// Optional strum-direction row above a block: s|v---^---| (v/d = down, ^/u = up)
+const STRUM_LINE_RE = /^\s*[sS]\|[\s|^vVuUdD-]*$/;
+
+function looksLikeTabLine(line) {
+  const dashes = (line.match(/-/g) || []).length;
+  if (dashes < 4) return false;
+  if (STRUM_LINE_RE.test(line)) return true;
+  return line.includes("-") && TAB_LINE_RE.test(line) && /[|-]/.test(line);
+}
+
+function parseTab(text) {
+  const lines = text.replace(/\r/g, "").split("\n");
+  const song = { title: "Untitled", artist: "", tempo: 120, subdivision: 4, parts: [] };
+  let currentName = null;
+  let pending = [];          // accumulating consecutive tab lines
+  let autoPart = 0;
+
+  function flushBlock() {
+    if (pending.length === 0) return;
+    let strumLine = null;
+    if (STRUM_LINE_RE.test(pending[0])) strumLine = pending.shift();
+    if (pending.length >= 6) {
+      // Use the first 6 lines (some tabs have 7+ with lyric rows filtered out already)
+      const block = parseBlock(pending.slice(0, 6), strumLine);
+      if (block.steps.length > 0) {
+        let name = currentName;
+        if (!name) { autoPart++; name = "Part " + autoPart; }
+        let part = song.parts.find(p => p.name === name && p.open);
+        if (!part) {
+          part = { name, blocks: [], open: true };
+          song.parts.push(part);
+        }
+        part.blocks.push(block);
+      }
+    }
+    pending = [];
+  }
+
+  for (const raw of lines) {
+    const line = raw;
+    const trimmed = line.trim();
+    const metaMatch = trimmed.match(/^(Title|Artist|Tempo|Subdivision)\s*:\s*(.+)$/i);
+    const sectMatch = trimmed.match(/^\[(.+)\]$/);
+
+    if (trimmed !== "" && looksLikeTabLine(line) && line.includes("|")) {
+      pending.push(line);
+      continue;
+    }
+    // Non-tab line: close any pending block
+    flushBlock();
+
+    if (metaMatch) {
+      const key = metaMatch[1].toLowerCase();
+      const val = metaMatch[2].trim();
+      if (key === "title") song.title = val;
+      else if (key === "artist") song.artist = val;
+      else if (key === "tempo") song.tempo = Math.max(20, Math.min(400, parseInt(val, 10) || 120));
+      else if (key === "subdivision") song.subdivision = Math.max(1, Math.min(16, parseInt(val, 10) || 4));
+    } else if (sectMatch) {
+      // Close previous part of same name so repeats become separate parts
+      song.parts.forEach(p => p.open = false);
+      currentName = sectMatch[1].trim();
+    }
+  }
+  flushBlock();
+  song.parts.forEach(p => delete p.open);
+
+  // Deduplicate display names (e.g. two "[Verse]" sections)
+  const seen = {};
+  for (const p of song.parts) {
+    seen[p.name] = (seen[p.name] || 0) + 1;
+    if (seen[p.name] > 1) p.name = p.name + " (" + seen[p.name] + ")";
+  }
+  for (const p of song.parts) {
+    p.id = Math.random().toString(36).slice(2);
+    p.enabled = true;
+    p.stepCount = p.blocks.reduce((n, b) => n + b.steps.length, 0);
+    p.measureCount = p.blocks.reduce((n, b) => n + b.measures, 0);
+  }
+  return song;
+}
+
+// Parse one 6-line block (plus optional strum row) into columns.
+function parseBlock(rawLines, strumLine) {
+  // Strip the string label: everything up to and including the first '|'
+  const bodies = rawLines.map(l => {
+    const i = l.indexOf("|");
+    return i >= 0 ? l.slice(i + 1) : l;
+  });
+  const width = Math.max(...bodies.map(b => b.length));
+  const rows = bodies.map(b => b.padEnd(width, " "));
+  let strumRow = null;
+  if (strumLine) {
+    const i = strumLine.indexOf("|");
+    strumRow = strumLine.slice(i + 1).padEnd(width, " ");
+  }
+
+  // Pre-pass per string: decide where notes start. Adjacent digits are
+  // separate notes on the time grid ("33" = two strums, "020" = three notes).
+  // Exceptions: an ISOLATED digit pair starting with 1 is a high fret
+  // ("-12-" = fret 12; frets 10-19), and "(n)" is always fret n explicitly.
+  const noteStarts = rows.map(r => {
+    const starts = new Map(); // col -> fret
+    let x = 0;
+    while (x < width) {
+      const c = r[x];
+      if (c === "(") {
+        const m = r.slice(x).match(/^\((\d{1,2})\)/);
+        if (m && +m[1] <= 24) { starts.set(x, +m[1]); x += m[0].length; continue; }
+        x++; continue;
+      }
+      if (/[0-9]/.test(c)) {
+        let fret = +c, span = 1;
+        const prevIsDigit = x > 0 && /[0-9]/.test(r[x - 1]);
+        const nextIsDigit = x + 1 < width && /[0-9]/.test(r[x + 1]);
+        const afterIsDigit = x + 2 < width && /[0-9]/.test(r[x + 2]);
+        if (c === "1" && nextIsDigit && !prevIsDigit && !afterIsDigit) {
+          fret = +(c + r[x + 1]); span = 2;
+        }
+        starts.set(x, fret);
+        x += span;
+      } else x++;
+    }
+    return starts;
+  });
+
+  const cols = [];      // every visual column: {chars:[6], isBar, step (index or -1), notes:[]}
+  const steps = [];     // time steps only
+  let measures = 0;
+  let inMeasure = false;
+
+  for (let x = 0; x < width; x++) {
+    const chars = rows.map(r => r[x]);
+    const isBar = chars.some(c => c === "|");
+    const sc = strumRow ? strumRow[x] : " ";
+    const strum = /[vVdD]/.test(sc) ? "d" : /[\^uU]/.test(sc) ? "u" : null;
+    const col = { chars, isBar, step: -1, notes: [], strum };
+    if (isBar) {
+      inMeasure = false;
+      cols.push(col);
+      continue;
+    }
+    if (!inMeasure && chars.some(c => c.trim() !== "")) { measures++; inMeasure = true; }
+    // Notes starting at this column
+    for (let s = 0; s < 6; s++) {
+      if (noteStarts[s].has(x)) {
+        col.notes.push({ string: s, fret: noteStarts[s].get(x) });
+      } else if (rows[s][x] === "x" || rows[s][x] === "X") {
+        col.notes.push({ string: s, fret: -1, mute: true });
+      }
+    }
+    col.step = steps.length;
+    steps.push(col);
+    cols.push(col);
+  }
+  // Drop trailing padding columns (all-blank, no notes) so they don't add silent time
+  while (cols.length && !cols[cols.length - 1].isBar &&
+         cols[cols.length - 1].notes.length === 0 &&
+         cols[cols.length - 1].chars.every(c => c === " " || c === "-") &&
+         cols[cols.length - 1].chars.some(c => c === " ")) {
+    const dropped = cols.pop();
+    if (dropped.step >= 0) steps.pop();
+  }
+  return { rawLines, cols, steps, measures: Math.max(1, measures), width, hasStrum: !!strumRow };
+}
+
+/* ============================== Audio engine ============================== */
+
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let ctx = null;
+let master = null;
+
+function ensureAudio() {
+  if (!ctx) {
+    ctx = new AudioCtx();
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.ratio.value = 6;
+    // Gentle "body" EQ: a little low-mid warmth, tame the zingy top end
+    const body = ctx.createBiquadFilter();
+    body.type = "peaking"; body.frequency.value = 180; body.Q.value = 1; body.gain.value = 2.5;
+    const shelf = ctx.createBiquadFilter();
+    shelf.type = "highshelf"; shelf.frequency.value = 5000; shelf.gain.value = -5;
+    master = ctx.createGain();
+    master.gain.value = state.volume / 100;
+    master.connect(body); body.connect(shelf); shelf.connect(comp);
+    comp.connect(ctx.destination);
+  }
+  if (ctx.state === "suspended") ctx.resume();
+}
+
+// Metronome tick for the count-in (accented on beat 1)
+function playTick(when, accent) {
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.value = accent ? 1320 : 880;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(accent ? 0.4 : 0.25, when);
+  g.gain.exponentialRampToValueAtTime(0.001, when + 0.07);
+  osc.connect(g); g.connect(master);
+  osc.start(when); osc.stop(when + 0.08);
+  return osc;
+}
+
+// Plucked string via additive synthesis: a sum of decaying harmonics with
+// exact pitch, a pick-position spectral shape, and faster decay for higher
+// harmonics (bright attack mellowing into a warm sustain). No noise burst,
+// so no click; no delay-line quantization, so no detuning.
+function pluckBuffer(freq, durSec) {
+  const sr = ctx.sampleRate;
+  const len = Math.floor(sr * durSec);
+  const buf = ctx.createBuffer(1, len, sr);
+  const out = buf.getChannelData(0);
+  const t60 = Math.max(1.3, Math.min(3.0, 3.0 - (freq - 80) / 300));
+  const pluckPos = 0.12 + Math.random() * 0.06; // where along the string we "pick"
+  const cosW = [], sinW = [], ph = [], qh = [], amp = [], decay = [];
+  let norm = 0;
+  for (let h = 1; h <= 9; h++) {
+    const f = freq * h * (1 + 0.00012 * h * h); // hint of stiff-string inharmonicity
+    if (f > sr * 0.45) break;
+    const om = 2 * Math.PI * f / sr;
+    cosW.push(Math.cos(om)); sinW.push(Math.sin(om));
+    ph.push(1); qh.push(0); // phasor starts at sin phase 0 → no DC step
+    const a = Math.abs(Math.sin(Math.PI * h * pluckPos)) / Math.pow(h, 0.9);
+    amp.push(a); norm += a;
+    const tau = t60 / (1 + 0.55 * (h - 1)) / 6.91; // T60 → time constant
+    decay.push(Math.exp(-1 / (tau * sr)));
+  }
+  const H = amp.length;
+  const scale = 0.6 / norm;
+  const atk = Math.max(1, Math.floor(0.0025 * sr));
+  for (let i = 0; i < len; i++) {
+    let v = 0;
+    for (let h = 0; h < H; h++) {
+      const nc = ph[h] * cosW[h] - qh[h] * sinW[h];
+      const ns = qh[h] * cosW[h] + ph[h] * sinW[h];
+      ph[h] = nc; qh[h] = ns;
+      amp[h] *= decay[h];
+      v += amp[h] * ns;
+    }
+    out[i] = v * scale * (i < atk ? i / atk : 1);
+  }
+  return buf;
+}
+
+// A real string is monophonic: re-plucking it chokes the note that was ringing.
+const stringVoices = [null, null, null, null, null, null];
+
+function playNote(stringIdx, fret, when, velocity) {
+  const midi = TUNING[stringIdx] + fret;
+  const freq = 440 * Math.pow(2, (midi - 69) / 12);
+  const dur = Math.min(2.8, Math.max(1.2, 280 / freq));
+  const prev = stringVoices[stringIdx];
+  if (prev && prev.until > when) {
+    prev.g.gain.cancelScheduledValues(when);
+    prev.g.gain.setTargetAtTime(0, when, 0.015);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = pluckBuffer(freq, dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(velocity, when + 0.002);
+  g.gain.setTargetAtTime(0, when + dur - 0.25, 0.06); // tail safety fade, buffer is near-silent by then
+  src.connect(g);
+  g.connect(master);
+  src.start(when);
+  stringVoices[stringIdx] = { g, until: when + dur };
+}
+
+function playMute(when) {
+  const len = Math.floor(ctx.sampleRate * 0.06);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const f = ctx.createBiquadFilter();
+  f.type = "bandpass"; f.frequency.value = 900; f.Q.value = 1.2;
+  const g = ctx.createGain();
+  g.gain.value = 0.35;
+  src.connect(f); f.connect(g); g.connect(master);
+  src.start(when);
+}
+
+/* ============================== Player state ============================== */
+
+const state = {
+  song: null,
+  order: [],          // array of part ids in play order
+  timeline: [],       // flattened steps: {col, partId, measureStart}
+  measureStarts: [],  // timeline indexes where a measure begins
+  stepIdx: 0,
+  playing: false,
+  bpm: 120,
+  loopAll: true,
+  loopPartId: null,
+  nextNoteTime: 0,
+  timer: null,
+  uiQueue: [],
+  activeLib: null,
+  countIn: localStorage.getItem("pa.countIn") !== "0",
+  volume: +(localStorage.getItem("pa.volume") || 80),
+  fontSize: +(localStorage.getItem("pa.fontSize") || 14),
+  countInNodes: [],
+  countInTimers: [],
+};
+
+function stepDur() {
+  return 60 / state.bpm / (state.song ? state.song.subdivision : 4);
+}
+
+function rebuildTimeline() {
+  state.timeline = [];
+  state.measureStarts = [];
+  if (!state.song) return;
+  for (const pid of state.order) {
+    const part = state.song.parts.find(p => p.id === pid);
+    if (!part || !part.enabled) continue;
+    for (const block of part.blocks) {
+      let atMeasureStart = true;
+      for (const col of block.cols) {
+        if (col.isBar) { atMeasureStart = true; continue; }
+        if (col.step < 0) continue;
+        if (atMeasureStart) { state.measureStarts.push(state.timeline.length); atMeasureStart = false; }
+        state.timeline.push({ col, partId: pid });
+      }
+    }
+  }
+  state.stepIdx = Math.min(state.stepIdx, Math.max(0, state.timeline.length - 1));
+}
+
+function measureOfStep(idx) {
+  let m = 0;
+  while (m + 1 < state.measureStarts.length && state.measureStarts[m + 1] <= idx) m++;
+  return m; // 0-based measure index
+}
+
+/* ============================== Scheduler ============================== */
+
+const LOOKAHEAD = 0.12;     // seconds of audio scheduled ahead
+const TICK_MS = 30;
+
+function scheduleStep(entry, when) {
+  // Strum: sweep across the strings a few ms apart, so chords don't hit as one
+  // mechanical block. Downstrokes sweep low→high; upstrokes high→low and a
+  // touch softer, like a real picking hand. Default (no marking) is down.
+  const dir = entry.col.strum;
+  const notes = entry.col.notes.slice().sort((a, b) =>
+    dir === "u" ? a.string - b.string : b.string - a.string);
+  const strum = notes.length > 1 ? Math.min(0.018, stepDur() * 0.15) / notes.length : 0;
+  notes.forEach((n, i) => {
+    const t = when + i * strum + Math.random() * 0.002;
+    if (n.mute) playMute(t);
+    else playNote(n.string, n.fret, t, (dir === "u" ? 0.36 : 0.42) + Math.random() * 0.13);
+  });
+  state.uiQueue.push({ idx: state.timeline.indexOf(entry), time: when });
+}
+
+function loopBounds() {
+  // Returns [start, end) step indexes of the active loop region
+  if (state.loopPartId) {
+    let start = -1, end = -1;
+    state.timeline.forEach((e, i) => {
+      if (e.partId === state.loopPartId) { if (start < 0) start = i; end = i + 1; }
+    });
+    if (start >= 0) return [start, end];
+  }
+  return [0, state.timeline.length];
+}
+
+function schedulerTick() {
+  if (!state.playing) return;
+  const [lo, hi] = loopBounds();
+  while (state.nextNoteTime < ctx.currentTime + LOOKAHEAD) {
+    if (state.stepIdx >= hi || state.stepIdx < lo) {
+      if (state.loopAll || state.loopPartId) {
+        state.stepIdx = lo;
+      } else {
+        finishPlayback();
+        return;
+      }
+    }
+    const entry = state.timeline[state.stepIdx];
+    if (!entry) { finishPlayback(); return; }
+    scheduleStep(entry, state.nextNoteTime);
+    state.nextNoteTime += stepDur();
+    state.stepIdx++;
+  }
+}
+
+function finishPlayback() {
+  // Let scheduled audio ring out, then stop.
+  state.playing = false;
+  clearInterval(state.timer);
+  setTimeout(() => { if (!state.playing) setPlayingUI(false); }, 50);
+  state.stepIdx = 0;
+  highlightStep(0);
+}
+
+function cancelCountIn() {
+  state.countInNodes.forEach(n => { try { n.stop(); } catch (e) {} });
+  state.countInNodes = [];
+  state.countInTimers.forEach(clearTimeout);
+  state.countInTimers = [];
+  $("countOverlay").style.display = "none";
+}
+
+function startPlayback() {
+  if (!state.song || state.timeline.length === 0) { toast("Load a tab first"); return; }
+  ensureAudio();
+  const [lo, hi] = loopBounds();
+  if (state.stepIdx < lo || state.stepIdx >= hi) state.stepIdx = lo;
+  state.playing = true;
+  let start = ctx.currentTime + 0.08;
+  if (state.countIn) {
+    const beat = 60 / state.bpm;
+    const overlay = $("countOverlay");
+    for (let i = 0; i < 4; i++) {
+      state.countInNodes.push(playTick(start + i * beat, i === 0));
+      state.countInTimers.push(setTimeout(() => {
+        overlay.style.display = "flex";
+        overlay.firstElementChild.textContent = i + 1;
+      }, Math.max(0, (start + i * beat - ctx.currentTime) * 1000)));
+    }
+    state.countInTimers.push(setTimeout(() => { overlay.style.display = "none"; },
+      Math.max(0, (start + 4 * beat - ctx.currentTime) * 1000)));
+    start += 4 * beat;
+  }
+  state.nextNoteTime = start;
+  state.uiQueue = [];
+  state.timer = setInterval(schedulerTick, TICK_MS);
+  setPlayingUI(true);
+  requestAnimationFrame(uiTick);
+}
+
+function pausePlayback() {
+  state.playing = false;
+  clearInterval(state.timer);
+  state.uiQueue = [];
+  cancelCountIn();
+  setPlayingUI(false);
+}
+
+function stopPlayback() {
+  pausePlayback();
+  state.stepIdx = loopBounds()[0];
+  highlightStep(state.stepIdx);
+}
+
+/* ============================== UI rendering ============================== */
+
+const $ = id => document.getElementById(id);
+const tabScroll = $("tabScroll");
+let colEls = [];   // parallel to state.timeline render order: each timeline idx -> column element
+let lastHighlit = -1;
+
+function renderSong() {
+  tabScroll.innerHTML = "";
+  colEls = [];
+  lastHighlit = -1;
+  if (!state.song) return;
+
+  let timelineIdx = 0;
+  for (const pid of state.order) {
+    const part = state.song.parts.find(p => p.id === pid);
+    if (!part) continue;
+
+    const label = document.createElement("div");
+    label.className = "section-label";
+    label.textContent = part.name + " ";
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = part.enabled
+      ? part.measureCount + (part.measureCount === 1 ? " measure" : " measures")
+      : "skipped";
+    label.appendChild(badge);
+    if (!part.enabled) label.style.opacity = 0.45;
+    tabScroll.appendChild(label);
+
+    for (const block of part.blocks) {
+      const blockEl = document.createElement("div");
+      blockEl.className = "block";
+      if (!part.enabled) blockEl.style.opacity = 0.35;
+
+      // String-name label column
+      const lblCol = document.createElement("div");
+      lblCol.className = "col nostep";
+      if (block.hasStrum) {
+        const c = document.createElement("div");
+        c.className = "c lbl";
+        c.textContent = " ";
+        lblCol.appendChild(c);
+      }
+      for (let s = 0; s < 6; s++) {
+        const c = document.createElement("div");
+        c.className = "c lbl";
+        c.textContent = STRING_NAMES[s];
+        lblCol.appendChild(c);
+      }
+      blockEl.appendChild(lblCol);
+
+      for (const col of block.cols) {
+        const colEl = document.createElement("div");
+        colEl.className = "col" + (col.isBar ? " bar nostep" : "");
+        if (block.hasStrum) {
+          const c = document.createElement("div");
+          c.className = "c strum" + (col.strum ? " arrow" : "");
+          c.textContent = col.strum === "d" ? "↓" : col.strum === "u" ? "↑" : col.isBar ? "|" : " ";
+          colEl.appendChild(c);
+        }
+        for (let s = 0; s < 6; s++) {
+          const c = document.createElement("div");
+          c.className = "c";
+          const ch = col.chars[s];
+          c.textContent = ch === " " ? "-" : ch;
+          if (/[0-9xX]/.test(ch)) c.classList.add("note");
+          colEl.appendChild(c);
+        }
+        if (!col.isBar && part.enabled) {
+          const myIdx = timelineIdx++;
+          colEls[myIdx] = colEl;
+          colEl.addEventListener("click", () => seekTo(myIdx));
+        }
+        blockEl.appendChild(colEl);
+      }
+      tabScroll.appendChild(blockEl);
+    }
+  }
+  renderProgressTicks();
+  highlightStep(Math.min(state.stepIdx, colEls.length - 1));
+  updatePosLabel();
+}
+
+function renderProgressTicks() {
+  const prog = $("progress");
+  prog.querySelectorAll(".progress-tick,.progress-part").forEach(e => e.remove());
+  const total = state.timeline.length;
+  if (!total) return;
+  let acc = 0;
+  for (const pid of state.order) {
+    const part = state.song.parts.find(p => p.id === pid);
+    if (!part || !part.enabled) continue;
+    if (acc > 0) {
+      const t = document.createElement("div");
+      t.className = "progress-part";
+      t.style.left = (acc / total * 100) + "%";
+      t.title = part.name;
+      prog.appendChild(t);
+    }
+    acc += part.stepCount;
+  }
+}
+
+function highlightStep(idx) {
+  const jumped = lastHighlit < 0 || idx < lastHighlit || idx - lastHighlit > 4;
+  if (lastHighlit >= 0 && colEls[lastHighlit]) colEls[lastHighlit].classList.remove("playhead");
+  if (idx >= 0 && colEls[idx]) {
+    colEls[idx].classList.add("playhead");
+    lastHighlit = idx;
+    followPlayhead(colEls[idx], jumped);
+  }
+  // progress bar
+  const total = state.timeline.length || 1;
+  $("progressFill").style.width = ((idx + 1) / total * 100) + "%";
+  // part highlight in sidebar
+  const entry = state.timeline[idx];
+  document.querySelectorAll(".part-item").forEach(el => {
+    el.classList.toggle("playing-part", !!entry && el.dataset.pid === entry.partId);
+  });
+  updatePosLabel();
+}
+
+// Keep the playhead in a comfortable zone with read-ahead: the active row sits at
+// ~30% from the top so upcoming rows are visible before they start playing.
+function followPlayhead(el, jumped) {
+  const sr = tabScroll.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const behavior = (!state.playing || jumped) ? "auto" : "smooth";
+  let top = null, left = null;
+  if (r.top < sr.top + sr.height * 0.10 || r.bottom > sr.top + sr.height * 0.62) {
+    top = tabScroll.scrollTop + (r.top - sr.top) - sr.height * 0.30;
+  }
+  if (r.left < sr.left + 60 || r.right > sr.left + sr.width * 0.78) {
+    left = tabScroll.scrollLeft + (r.left - sr.left) - sr.width * 0.22;
+  }
+  if (top !== null || left !== null) {
+    tabScroll.scrollTo({
+      top: top !== null ? Math.max(0, top) : tabScroll.scrollTop,
+      left: left !== null ? Math.max(0, left) : tabScroll.scrollLeft,
+      behavior,
+    });
+  }
+}
+
+function updatePosLabel() {
+  const total = state.timeline.length;
+  if (!total) { $("posLabel").textContent = "– / –"; return; }
+  const idx = lastHighlit >= 0 ? lastHighlit : state.stepIdx;
+  const beats = state.song ? state.song.subdivision : 4;
+  const m = measureOfStep(idx);
+  const beat = Math.floor((idx - state.measureStarts[m]) / beats) + 1;
+  $("posLabel").textContent = `measure ${m + 1} / ${state.measureStarts.length} · beat ${beat}`;
+}
+
+function uiTick() {
+  if (!state.playing && state.uiQueue.length === 0) return;
+  const now = ctx ? ctx.currentTime : 0;
+  let latest = -1;
+  while (state.uiQueue.length && state.uiQueue[0].time <= now) {
+    latest = state.uiQueue.shift().idx;
+  }
+  if (latest >= 0) highlightStep(latest);
+  if (state.playing || state.uiQueue.length) requestAnimationFrame(uiTick);
+}
+
+function seekTo(idx) {
+  state.stepIdx = Math.max(0, Math.min(idx, state.timeline.length - 1));
+  if (state.playing) {
+    cancelCountIn();
+    state.uiQueue = [];
+    state.nextNoteTime = ctx.currentTime + 0.05;
+  }
+  highlightStep(state.stepIdx);
+}
+
+function setPlayingUI(playing) {
+  $("playBtn").textContent = playing ? "❚❚" : "▶";
+  $("playBtn").title = playing ? "Pause (Space)" : "Play (Space)";
+}
+
+/* ---------- Parts panel ---------- */
+
+function renderParts() {
+  const list = $("partList");
+  list.innerHTML = "";
+  if (!state.song) return;
+  state.order.forEach((pid, i) => {
+    const part = state.song.parts.find(p => p.id === pid);
+    if (!part) return;
+    const item = document.createElement("div");
+    item.className = "part-item" + (part.enabled ? "" : " disabled-part");
+    item.dataset.pid = pid;
+    item.draggable = true;
+
+    const grip = document.createElement("span");
+    grip.className = "grip"; grip.textContent = "⠿";
+    item.appendChild(grip);
+
+    const name = document.createElement("span");
+    name.className = "part-name";
+    name.innerHTML = `${escapeHtml(part.name)} <small>· ${part.measureCount}m</small>`;
+    name.title = "Jump playback to " + part.name;
+    name.addEventListener("click", () => jumpToPart(pid));
+    item.appendChild(name);
+
+    const up = mkBtn("▲", "Move up", () => movePart(i, -1));
+    const down = mkBtn("▼", "Move down", () => movePart(i, +1));
+    const loop = mkBtn("⟳", "Loop only this part", () => toggleLoopPart(pid));
+    if (state.loopPartId === pid) loop.classList.add("loop-on");
+    const skip = mkBtn(part.enabled ? "✕" : "＋", part.enabled ? "Skip this part" : "Include this part", () => togglePart(pid));
+    item.append(up, down, loop, skip);
+
+    // Drag & drop
+    item.addEventListener("dragstart", e => {
+      item.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", pid);
+      e.dataTransfer.effectAllowed = "move";
+    });
+    item.addEventListener("dragend", () => {
+      item.classList.remove("dragging");
+      list.querySelectorAll(".part-item").forEach(x => x.classList.remove("drop-above", "drop-below"));
+    });
+    item.addEventListener("dragover", e => {
+      e.preventDefault();
+      const before = e.offsetY < item.offsetHeight / 2;
+      item.classList.toggle("drop-above", before);
+      item.classList.toggle("drop-below", !before);
+    });
+    item.addEventListener("dragleave", () => item.classList.remove("drop-above", "drop-below"));
+    item.addEventListener("drop", e => {
+      e.preventDefault();
+      const draggedPid = e.dataTransfer.getData("text/plain");
+      const before = e.offsetY < item.offsetHeight / 2;
+      reorderPart(draggedPid, pid, before);
+    });
+
+    list.appendChild(item);
+  });
+}
+
+function mkBtn(txt, title, fn) {
+  const b = document.createElement("button");
+  b.textContent = txt; b.title = title;
+  b.addEventListener("click", e => { e.stopPropagation(); fn(); });
+  return b;
+}
+
+function movePart(i, delta) {
+  const j = i + delta;
+  if (j < 0 || j >= state.order.length) return;
+  const [pid] = state.order.splice(i, 1);
+  state.order.splice(j, 0, pid);
+  afterStructureChange();
+}
+
+function reorderPart(draggedPid, targetPid, before) {
+  if (draggedPid === targetPid) return;
+  const from = state.order.indexOf(draggedPid);
+  state.order.splice(from, 1);
+  let to = state.order.indexOf(targetPid);
+  if (!before) to++;
+  state.order.splice(to, 0, draggedPid);
+  afterStructureChange();
+}
+
+function togglePart(pid) {
+  const part = state.song.parts.find(p => p.id === pid);
+  part.enabled = !part.enabled;
+  if (!part.enabled && state.loopPartId === pid) state.loopPartId = null;
+  afterStructureChange();
+}
+
+function toggleLoopPart(pid) {
+  state.loopPartId = state.loopPartId === pid ? null : pid;
+  const part = state.song.parts.find(p => p.id === pid);
+  if (state.loopPartId && !part.enabled) { part.enabled = true; }
+  if (state.loopPartId) {
+    const [lo] = loopBounds();
+    seekTo(lo);
+  }
+  renderParts();
+  renderSong();
+  updateLoopUI();
+}
+
+function clearPartLoop() {
+  if (!state.loopPartId) return;
+  state.loopPartId = null;
+  renderParts();
+  updateLoopUI();
+}
+
+function updateLoopUI() {
+  const chip = $("loopChip");
+  const region = $("loopRegion");
+  if (state.loopPartId && state.song) {
+    const part = state.song.parts.find(p => p.id === state.loopPartId);
+    $("loopChipText").textContent = "Looping: " + (part ? part.name : "?");
+    chip.style.display = "inline-flex";
+    const [lo, hi] = loopBounds();
+    const total = state.timeline.length || 1;
+    region.style.left = (lo / total * 100) + "%";
+    region.style.width = ((hi - lo) / total * 100) + "%";
+    region.style.display = "block";
+  } else {
+    chip.style.display = "none";
+    region.style.display = "none";
+  }
+}
+
+function jumpToPart(pid) {
+  let idx = state.timeline.findIndex(e => e.partId === pid);
+  if (idx < 0) {
+    const part = state.song.parts.find(p => p.id === pid);
+    toast(part.enabled ? "Part is empty" : "Part is skipped — click ＋ to include it");
+    return;
+  }
+  seekTo(idx);
+}
+
+function afterStructureChange() {
+  const wasPlaying = state.playing;
+  if (wasPlaying) pausePlayback();
+  // Keep position at the same offset inside whatever part we were in, if still present
+  const entry = state.timeline[state.stepIdx];
+  let offset = 0;
+  if (entry) {
+    let partStart = state.stepIdx;
+    while (partStart > 0 && state.timeline[partStart - 1].partId === entry.partId) partStart--;
+    offset = state.stepIdx - partStart;
+  }
+  rebuildTimeline();
+  let idx = 0;
+  if (entry) {
+    const found = state.timeline.findIndex(e => e.partId === entry.partId);
+    if (found >= 0) {
+      let partEnd = found;
+      while (partEnd + 1 < state.timeline.length && state.timeline[partEnd + 1].partId === entry.partId) partEnd++;
+      idx = Math.min(found + offset, partEnd);
+    }
+  }
+  state.stepIdx = idx;
+  renderParts();
+  renderSong();
+  updateLoopUI();
+  if (wasPlaying) startPlayback();
+}
+
+/* ---------- Library ---------- */
+
+function userTabs() {
+  try { return JSON.parse(localStorage.getItem("pa.userTabs") || "[]"); }
+  catch (e) { return []; }
+}
+
+function saveUserTab(text, title) {
+  const tabs = userTabs();
+  tabs.push({ title, text, id: "u" + Date.now() });
+  localStorage.setItem("pa.userTabs", JSON.stringify(tabs));
+  return tabs[tabs.length - 1].id;
+}
+
+function deleteUserTab(id) {
+  localStorage.setItem("pa.userTabs", JSON.stringify(userTabs().filter(t => t.id !== id)));
+}
+
+async function loadLibrary(autoSelect) {
+  const list = $("libList");
+  let firstBtn = null;
+  list.innerHTML = "";
+
+  try {
+    const res = await fetch("tabs/manifest.json");
+    if (!res.ok) throw new Error(res.status);
+    const manifest = await res.json();
+    for (const file of manifest.tabs) {
+      try {
+        const text = await (await fetch("tabs/" + file)).text();
+        const parsed = parseTab(text);
+        const btn = document.createElement("button");
+        btn.className = "lib-item";
+        btn.dataset.file = file;
+        btn.innerHTML = `${escapeHtml(parsed.title)}<small>${escapeHtml(parsed.artist || "")} · ${parsed.tempo} BPM</small>`;
+        btn.addEventListener("click", () => { loadSong(parsed, file); });
+        list.appendChild(btn);
+        if (!firstBtn) firstBtn = btn;
+      } catch (e) { console.warn("Failed to load tab", file, e); }
+    }
+    if (!list.children.length) list.innerHTML = '<p class="hint">No tabs found in ./tabs/</p>';
+  } catch (e) {
+    list.innerHTML = '<p class="hint">Couldn\'t read <code>tabs/manifest.json</code>. Serve this folder over HTTP, e.g.<br><code>python3 -m http.server 8765</code><br>then open <code>http://localhost:8765</code>. You can still paste a tab below.</p>';
+  }
+
+  // User-pasted tabs (persisted in this browser)
+  const mine = userTabs();
+  if (mine.length) {
+    const h = document.createElement("h2");
+    h.textContent = "Your tabs";
+    h.style.marginTop = "12px";
+    list.appendChild(h);
+    for (const t of mine) {
+      const group = document.createElement("div");
+      group.className = "lib-group";
+      const btn = document.createElement("button");
+      btn.className = "lib-item";
+      btn.dataset.file = t.id;
+      const parsed = parseTab(t.text);
+      btn.innerHTML = `${escapeHtml(parsed.title)}<small>pasted · ${parsed.tempo} BPM</small>`;
+      btn.addEventListener("click", () => loadSong(parseTab(t.text), t.id));
+      const del = document.createElement("button");
+      del.className = "lib-del";
+      del.textContent = "✕";
+      del.title = "Delete this pasted tab";
+      del.addEventListener("click", () => {
+        if (!confirm(`Delete "${parsed.title}" from your tabs?`)) return;
+        deleteUserTab(t.id);
+        loadLibrary(false);
+      });
+      group.append(btn, del);
+      list.appendChild(group);
+    }
+  }
+
+  if (autoSelect && firstBtn) firstBtn.click();
+  // keep active highlight in sync after re-render
+  document.querySelectorAll(".lib-item").forEach(b => b.classList.toggle("active", b.dataset.file === state.activeLib));
+}
+
+function loadSong(song, file) {
+  pausePlayback();
+  // Deep-ish reset of part state (parse result may be reused from the library cache)
+  song.parts.forEach(p => { p.enabled = true; });
+  state.song = song;
+  state.order = song.parts.map(p => p.id);
+  state.loopPartId = null;
+  state.stepIdx = 0;
+  state.bpm = song.tempo;
+  state.activeLib = file || null;
+  syncTempoUI();
+  rebuildTimeline();
+  renderParts();
+  renderSong();
+  $("songTitle").innerHTML = `<b>${escapeHtml(song.title)}</b>${song.artist ? " — " + escapeHtml(song.artist) : ""} · written at ${song.tempo} BPM`;
+  document.querySelectorAll(".lib-item").forEach(b => b.classList.toggle("active", b.dataset.file === file));
+  updateLoopUI();
+  highlightStep(0);
+}
+
+/* ---------- Tempo ---------- */
+
+function setBpm(v) {
+  state.bpm = Math.max(30, Math.min(260, Math.round(v)));
+  syncTempoUI();
+}
+
+function syncTempoUI() {
+  $("tempoSlider").value = state.bpm;
+  const pct = state.song ? Math.round(state.bpm / state.song.tempo * 100) : 100;
+  $("tempoVal").innerHTML = `${state.bpm} BPM <small>(${pct}%)</small>`;
+}
+
+/* ---------- Misc UI ---------- */
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.style.display = "none", 2600);
+}
+
+/* ============================== Wiring ============================== */
+
+$("playBtn").addEventListener("click", () => state.playing ? pausePlayback() : startPlayback());
+$("stopBtn").addEventListener("click", stopPlayback);
+$("tempoSlider").addEventListener("input", e => setBpm(+e.target.value));
+$("tempoSlider").addEventListener("change", e => e.target.blur()); // keep Space working after slider use
+$("tempoUp").addEventListener("click", () => setBpm(state.bpm + 5));
+$("tempoDown").addEventListener("click", () => setBpm(state.bpm - 5));
+$("tempoReset").addEventListener("click", () => { if (state.song) setBpm(state.song.tempo); });
+
+$("loopBtn").addEventListener("click", () => {
+  if (state.loopPartId) { clearPartLoop(); toast("Part loop released"); return; }
+  state.loopAll = !state.loopAll;
+  $("loopBtn").classList.toggle("toggled", state.loopAll);
+});
+$("loopChipClear").addEventListener("click", () => { clearPartLoop(); });
+
+$("countBtn").classList.toggle("toggled", state.countIn);
+$("countBtn").addEventListener("click", e => {
+  state.countIn = !state.countIn;
+  localStorage.setItem("pa.countIn", state.countIn ? "1" : "0");
+  e.currentTarget.classList.toggle("toggled", state.countIn);
+});
+
+$("volSlider").value = state.volume;
+$("volSlider").addEventListener("input", e => {
+  state.volume = +e.target.value;
+  localStorage.setItem("pa.volume", state.volume);
+  if (master) master.gain.value = state.volume / 100;
+});
+$("volSlider").addEventListener("change", e => e.target.blur());
+
+function applyFontSize() {
+  tabScroll.style.setProperty("--tabfont", state.fontSize + "px");
+  localStorage.setItem("pa.fontSize", state.fontSize);
+}
+$("fontUp").addEventListener("click", () => { state.fontSize = Math.min(30, state.fontSize + 2); applyFontSize(); });
+$("fontDown").addEventListener("click", () => { state.fontSize = Math.max(10, state.fontSize - 2); applyFontSize(); });
+applyFontSize();
+
+$("progress").addEventListener("click", e => {
+  if (!state.timeline.length) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  const frac = (e.clientX - r.left) / r.width;
+  seekTo(Math.floor(frac * state.timeline.length));
+});
+
+$("pasteBtn").addEventListener("click", () => { $("pasteErr").style.display = "none"; $("pasteDlg").showModal(); });
+$("pasteCancel").addEventListener("click", () => $("pasteDlg").close());
+$("pasteArea").addEventListener("input", () => $("pasteErr").style.display = "none");
+$("pasteLoad").addEventListener("click", () => {
+  const text = $("pasteArea").value;
+  const song = parseTab(text);
+  if (!song.parts.length) {
+    const tabLines = text.split("\n").filter(l => looksLikeTabLine(l) && l.includes("|")).length;
+    $("pasteErr").textContent = tabLines > 0
+      ? `Couldn't find a complete tab block — found ${tabLines} string line${tabLines === 1 ? "" : "s"}, but each block needs 6 consecutive ones (e B G D A E).`
+      : "Couldn't find any tab lines. Each block needs 6 consecutive lines like e|--0--2--|.";
+    $("pasteErr").style.display = "block";
+    return;
+  }
+  const id = saveUserTab(text, song.title);
+  $("pasteDlg").close();
+  $("pasteArea").value = "";
+  loadSong(song, id);
+  loadLibrary(false);
+  toast(`Saved "${song.title}" to Your tabs`);
+});
+
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  // Let text fields behave normally, but reclaim keys from sliders/buttons so
+  // Space and arrows always control playback after clicking any control.
+  if (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && t.type !== "range")) return;
+  if (e.code === "Space") { e.preventDefault(); state.playing ? pausePlayback() : startPlayback(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); setBpm(state.bpm + 5); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); setBpm(state.bpm - 5); }
+  else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    e.preventDefault();
+    if (!state.measureStarts.length) return;
+    const m = measureOfStep(state.stepIdx);
+    let target;
+    if (e.key === "ArrowRight") {
+      target = m + 1 < state.measureStarts.length ? state.measureStarts[m + 1] : state.measureStarts[m];
+    } else {
+      // Go to start of current measure, or previous measure if already at its start
+      target = state.stepIdx > state.measureStarts[m] ? state.measureStarts[m]
+             : state.measureStarts[Math.max(0, m - 1)];
+    }
+    seekTo(target);
+  }
+});
+
+loadLibrary(true);
+</script>
+</body>
+</html>
