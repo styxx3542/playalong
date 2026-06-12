@@ -128,6 +128,7 @@
     font-size: var(--tabfont, 14px); line-height: 1.35;
     margin-bottom: 10px;
     border-radius: 6px;
+    user-select: none;
   }
   .col { display: flex; flex-direction: column; position: relative; cursor: pointer; }
   .col .c { width: 1ch; height: 1.35em; white-space: pre; color: #6b7484; text-align: center; }
@@ -141,6 +142,7 @@
     background: var(--accent); border-radius: 2px;
   }
   .col.playhead .c.note { color: var(--accent); }
+  .col.selrange { background: rgba(245,165,36,0.10); box-shadow: inset 0 -2px 0 rgba(245,165,36,0.5); }
   .col.nostep { cursor: default; }
   .col .c.strum { color: #4a5364; }
   .col .c.strum.arrow { color: var(--accent); font-weight: 700; }
@@ -644,6 +646,7 @@ const state = {
   bpm: 120,
   loopAll: true,
   loopPartId: null,
+  loopSel: null,      // {lo, hi} half-open timeline step range, or null
   nextNoteTime: 0,
   timer: null,
   uiQueue: [],
@@ -710,6 +713,11 @@ function scheduleStep(entry, when) {
 
 function loopBounds() {
   // Returns [start, end) step indexes of the active loop region
+  if (state.loopSel) {
+    const lo = Math.max(0, state.loopSel.lo);
+    const hi = Math.min(state.timeline.length, state.loopSel.hi);
+    if (lo < hi) return [lo, hi];
+  }
   if (state.loopPartId) {
     let start = -1, end = -1;
     state.timeline.forEach((e, i) => {
@@ -725,7 +733,7 @@ function schedulerTick() {
   const [lo, hi] = loopBounds();
   while (state.nextNoteTime < ctx.currentTime + LOOKAHEAD) {
     if (state.stepIdx >= hi || state.stepIdx < lo) {
-      if (state.loopAll || state.loopPartId) {
+      if (state.loopAll || state.loopPartId || state.loopSel) {
         state.stepIdx = lo;
       } else {
         finishPlayback();
@@ -810,6 +818,8 @@ const $ = id => document.getElementById(id);
 const tabScroll = $("tabScroll");
 let colEls = [];   // parallel to state.timeline render order: each timeline idx -> column element
 let lastHighlit = -1;
+let dragSel = null;            // {anchor, last} while the mouse is down on a column
+let suppressNextClick = false; // a completed drag must not also fire the click-to-seek
 
 function renderSong() {
   tabScroll.innerHTML = "";
@@ -876,7 +886,22 @@ function renderSong() {
         if (!col.isBar && part.enabled) {
           const myIdx = timelineIdx++;
           colEls[myIdx] = colEl;
-          colEl.addEventListener("click", () => seekTo(myIdx));
+          colEl.addEventListener("click", () => {
+            if (suppressNextClick) { suppressNextClick = false; return; }
+            seekTo(myIdx);
+          });
+          colEl.addEventListener("mousedown", e => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            dragSel = { anchor: myIdx, last: myIdx };
+          });
+          colEl.addEventListener("mouseover", () => {
+            if (!dragSel) return;
+            dragSel.last = myIdx;
+            const lo = Math.min(dragSel.anchor, dragSel.last);
+            const hi = Math.max(dragSel.anchor, dragSel.last);
+            colEls.forEach((el, i) => { if (el) el.classList.toggle("selrange", i >= lo && i <= hi); });
+          });
         }
         blockEl.appendChild(colEl);
       }
@@ -885,6 +910,7 @@ function renderSong() {
   }
   renderProgressTicks();
   highlightStep(Math.min(state.stepIdx, colEls.length - 1));
+  paintSelection();
   updatePosLabel();
 }
 
@@ -1079,6 +1105,7 @@ function togglePart(pid) {
 
 function toggleLoopPart(pid) {
   state.loopPartId = state.loopPartId === pid ? null : pid;
+  if (state.loopPartId) { state.loopSel = null; }
   const part = state.song.parts.find(p => p.id === pid);
   if (state.loopPartId && !part.enabled) { part.enabled = true; }
   if (state.loopPartId) {
@@ -1097,15 +1124,46 @@ function clearPartLoop() {
   updateLoopUI();
 }
 
+function paintSelection() {
+  const sel = state.loopSel;
+  colEls.forEach((el, i) => {
+    if (el) el.classList.toggle("selrange", !!sel && i >= sel.lo && i < sel.hi);
+  });
+}
+
+function setSelectionLoop(lo, hi) {
+  state.loopPartId = null;
+  state.loopSel = { lo, hi };
+  paintSelection();
+  renderParts();          // drop any part-loop highlight
+  updateLoopUI();
+  seekTo(lo);
+}
+
+function clearSelectionLoop() {
+  if (!state.loopSel) return;
+  state.loopSel = null;
+  paintSelection();
+  updateLoopUI();
+}
+
 function updateLoopUI() {
   const chip = $("loopChip");
   const region = $("loopRegion");
-  if (state.loopPartId && state.song) {
+  const total = state.timeline.length || 1;
+  let label = null, lo = 0, hi = 0;
+  if (state.loopSel && state.song) {
+    [lo, hi] = loopBounds();
+    const m1 = measureOfStep(lo) + 1, m2 = measureOfStep(Math.max(lo, hi - 1)) + 1;
+    label = "Looping: " + (m1 === m2 ? "measure " + m1 : "measures " + m1 + "–" + m2);
+  } else if (state.loopPartId && state.song) {
     const part = state.song.parts.find(p => p.id === state.loopPartId);
-    $("loopChipText").textContent = "Looping: " + (part ? part.name : "?");
+    label = "Looping: " + (part ? part.name : "?");
+    [lo, hi] = loopBounds();
+  }
+  if (label) {
+    $("loopChipText").textContent = label;
     chip.style.display = "inline-flex";
-    const [lo, hi] = loopBounds();
-    const total = state.timeline.length || 1;
     region.style.left = (lo / total * 100) + "%";
     region.style.width = ((hi - lo) / total * 100) + "%";
     region.style.display = "block";
@@ -1136,6 +1194,7 @@ function afterStructureChange() {
     while (partStart > 0 && state.timeline[partStart - 1].partId === entry.partId) partStart--;
     offset = state.stepIdx - partStart;
   }
+  state.loopSel = null;   // timeline indexes shift when parts move/skip
   rebuildTimeline();
   let idx = 0;
   if (entry) {
@@ -1240,6 +1299,7 @@ function loadSong(song, file) {
   state.song = song;
   state.order = song.parts.map(p => p.id);
   state.loopPartId = null;
+  state.loopSel = null;
   state.stepIdx = 0;
   state.bpm = song.tempo;
   state.activeLib = file || null;
@@ -1292,11 +1352,24 @@ $("tempoDown").addEventListener("click", () => setBpm(state.bpm - 5));
 $("tempoReset").addEventListener("click", () => { if (state.song) setBpm(state.song.tempo); });
 
 $("loopBtn").addEventListener("click", () => {
+  if (state.loopSel) { clearSelectionLoop(); toast("Selection loop released"); return; }
   if (state.loopPartId) { clearPartLoop(); toast("Part loop released"); return; }
   state.loopAll = !state.loopAll;
   $("loopBtn").classList.toggle("toggled", state.loopAll);
 });
-$("loopChipClear").addEventListener("click", () => { clearPartLoop(); });
+$("loopChipClear").addEventListener("click", () => { clearSelectionLoop(); clearPartLoop(); });
+
+document.addEventListener("mouseup", () => {
+  if (!dragSel) return;
+  const { anchor, last } = dragSel;
+  dragSel = null;
+  if (anchor === last) { paintSelection(); return; } // plain click: let click-to-seek handle it
+  // Swallow the click this mouseup may synthesize (it can land on a column or an
+  // ancestor depending on where the drag ended), but never a later, real click.
+  suppressNextClick = true;
+  setTimeout(() => { suppressNextClick = false; }, 0);
+  setSelectionLoop(Math.min(anchor, last), Math.max(anchor, last) + 1);
+});
 
 $("countBtn").classList.toggle("toggled", state.countIn);
 $("countBtn").addEventListener("click", e => {
