@@ -4,6 +4,13 @@ A zero-dependency guitar tab player. Paste or load standard ASCII guitar tabs an
 plays them with a synthesized plucked-string sound, a moving focus bar over the tab,
 adjustable tempo, and reorderable song parts.
 
+## Demo
+
+Chord detection in action on Pink Floyd's *Wish You Were Here* riff — `Em7 · G5 · A7sus4`
+labelled above the tab as the playhead moves through each chord:
+
+[▶ chord-detection-demo.mp4](docs/chord-detection-demo.mp4)
+
 ## Run it
 
 ```sh
@@ -31,6 +38,9 @@ everything else is a single static `index.html`.)
   saved to the browser under "Your tabs"
 - **Practice comforts** — volume slider, A−/A+ tab text size, ←/→ jump by measure, Space play/pause
   (works even right after using a slider), measure/beat position readout
+- **Chord detection** — when a strum grips a chord, its name (`Em7`, `G5`, `A7sus4`…) appears above
+  the tab, chord-chart style: labelled where the chord changes, with partial upstrokes folded into the
+  held chord so they aren't mislabelled. Toggle with the **Chords** button.
 
 ## Tab format
 
