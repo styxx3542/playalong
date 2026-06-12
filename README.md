@@ -23,6 +23,10 @@ everything else is a single static `index.html`.)
 - **Parts** — sections (`[Intro]`, `[Verse]`…) become draggable parts: reorder, skip, loop one part, click to jump
 - **Loop** whole song or a single part (shown as a chip in the transport and shaded on the progress bar)
 - **Count-in** — one bar of clicks with an on-screen countdown before playback (toggleable)
+- **Metronome** — click on every beat during playback (accented on measure starts), toggleable
+- **Silent guitar mode** — mute the synthesized guitar and play along with just the click and focus bar
+- **A/B selection loop** — drag across the tab to loop any phrase; chip + progress-bar stripe show the region
+- **Speed trainer** — start a loop at e.g. 60% tempo and let it rise +5% every pass until 100%
 - **Library** — every tab listed in `tabs/manifest.json` shows in the sidebar; pasted tabs are
   saved to the browser under "Your tabs"
 - **Practice comforts** — volume slider, A−/A+ tab text size, ←/→ jump by measure, Space play/pause
