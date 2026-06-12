@@ -6,10 +6,22 @@ adjustable tempo, and reorderable song parts.
 
 ## Demo
 
-Chord detection in action on Pink Floyd's *Wish You Were Here* riff — `Em7 · G5 · A7sus4`
-labelled above the tab as the playhead moves through each chord:
+Chord detection on Pink Floyd's *Wish You Were Here* riff — `Em7 · G5 · A7sus4` labelled
+above the tab as the playhead moves through each chord:
 
-[▶ chord-detection-demo.mp4](docs/chord-detection-demo.mp4)
+![Chord detection demo](docs/chord-detection-demo.gif)
+
+<sub>(Same clip as a higher-quality [MP4](docs/chord-detection-demo.mp4).)</sub>
+
+### Screenshots
+
+The whole riff, every detected chord above the staff:
+
+![Overview — Em7, G5 and A7sus4 labelled above the tab](docs/screenshots/overview.png)
+
+The focus bar crossing the `A7sus4/E` change in Riff Part 2:
+
+![Playhead on the A7sus4 chord](docs/screenshots/playing-a7sus4.png)
 
 ## Run it
 
