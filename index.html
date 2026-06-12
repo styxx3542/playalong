@@ -246,6 +246,21 @@
     padding: 9px 16px; border-radius: 8px; font-size: 13px; display: none; z-index: 50;
     box-shadow: 0 4px 20px rgba(0,0,0,0.4);
   }
+  #trainerPop {
+    display: none; position: fixed; z-index: 45; width: 240px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+  }
+  #trainerPop.open { display: block; }
+  #trainerPop label {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; color: var(--muted); margin-bottom: 8px;
+  }
+  #trainerPop input {
+    width: 60px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 13px;
+  }
+  #trainerPop > button { width: 100%; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -284,6 +299,7 @@
           <button class="ctl" id="tempoUp" title="Faster (↑)">+5</button>
           <div id="tempoVal">120 BPM <small>(100%)</small></div>
           <button class="ctl" id="tempoReset" title="Reset to the tab's written tempo">Reset</button>
+          <button class="ctl" id="trainerBtn" title="Speed trainer: raise the tempo every loop pass">Trainer</button>
         </div>
         <div class="ctl-group">
           <button class="ctl toggled" id="loopBtn" title="Loop the whole song">Loop ⟳</button>
@@ -332,6 +348,14 @@ E|-------------|"></textarea>
     <button class="ctl" id="pasteLoad" style="background:var(--accent);color:#1a1304;border:none">Save &amp; load tab</button>
   </div>
 </dialog>
+
+<div id="trainerPop">
+  <label>Start <span><input type="number" id="trStart" min="20" max="100" step="5"> %</span></label>
+  <label>Step <span>+<input type="number" id="trStep" min="1" max="50" step="1"> %</span></label>
+  <label>Target <span><input type="number" id="trTarget" min="30" max="200" step="5"> %</span></label>
+  <button class="ctl" id="trArm">Start training</button>
+  <p class="hint">Starts at Start% of the written tempo and rises by Step% each time the loop wraps, holding at Target%.</p>
+</div>
 
 <div id="toast"></div>
 <div id="countOverlay"><span></span></div>
@@ -656,9 +680,16 @@ const state = {
   muteGuitar: localStorage.getItem("pa.muteGuitar") === "1",
   volume: +(localStorage.getItem("pa.volume") || 80),
   fontSize: +(localStorage.getItem("pa.fontSize") || 14),
+  trainer: { armed: false, start: 60, step: 5, target: 100, savedBpm: null },
   countInNodes: [],
   countInTimers: [],
 };
+try {
+  const t = JSON.parse(localStorage.getItem("pa.trainer") || "{}");
+  if (+t.start) state.trainer.start = Math.max(20, Math.min(100, +t.start));
+  if (+t.step) state.trainer.step = Math.max(1, Math.min(50, +t.step));
+  if (+t.target) state.trainer.target = Math.max(30, Math.min(200, +t.target));
+} catch (e) {}
 
 function stepDur() {
   return 60 / state.bpm / (state.song ? state.song.subdivision : 4);
@@ -734,7 +765,9 @@ function schedulerTick() {
   while (state.nextNoteTime < ctx.currentTime + LOOKAHEAD) {
     if (state.stepIdx >= hi || state.stepIdx < lo) {
       if (state.loopAll || state.loopPartId || state.loopSel) {
+        const wrapped = state.stepIdx >= hi;
         state.stepIdx = lo;
+        if (wrapped) trainerOnWrap();
       } else {
         finishPlayback();
         return;
@@ -1302,8 +1335,11 @@ function loadSong(song, file) {
   state.loopSel = null;
   state.stepIdx = 0;
   state.bpm = song.tempo;
+  state.trainer.armed = false;
+  state.trainer.savedBpm = null;
   state.activeLib = file || null;
   syncTempoUI();
+  syncTrainerUI();
   rebuildTimeline();
   renderParts();
   renderSong();
@@ -1324,6 +1360,47 @@ function syncTempoUI() {
   $("tempoSlider").value = state.bpm;
   const pct = state.song ? Math.round(state.bpm / state.song.tempo * 100) : 100;
   $("tempoVal").innerHTML = `${state.bpm} BPM <small>(${pct}%)</small>`;
+}
+
+/* ---------- Speed trainer ---------- */
+
+function saveTrainerPrefs() {
+  localStorage.setItem("pa.trainer", JSON.stringify({
+    start: state.trainer.start, step: state.trainer.step, target: state.trainer.target,
+  }));
+}
+
+function syncTrainerUI() {
+  $("trStart").value = state.trainer.start;
+  $("trStep").value = state.trainer.step;
+  $("trTarget").value = state.trainer.target;
+  $("trArm").textContent = state.trainer.armed ? "Stop training" : "Start training";
+  $("trainerBtn").classList.toggle("toggled", state.trainer.armed);
+}
+
+function armTrainer() {
+  if (!state.song) { toast("Load a tab first"); return; }
+  state.trainer.armed = true;
+  state.trainer.savedBpm = state.bpm;
+  setBpm(state.song.tempo * state.trainer.start / 100);
+  syncTrainerUI();
+  toast(`Trainer on: ${state.trainer.start}% → ${state.trainer.target}%, +${state.trainer.step}% per pass`);
+}
+
+function disarmTrainer() {
+  state.trainer.armed = false;
+  if (state.trainer.savedBpm) setBpm(state.trainer.savedBpm);
+  state.trainer.savedBpm = null;
+  syncTrainerUI();
+}
+
+// Called from schedulerTick each time playback wraps at the loop end.
+// Computes the ramp from the CURRENT bpm, so manual slider moves re-base it.
+function trainerOnWrap() {
+  if (!state.trainer.armed || !state.song) return;
+  const pct = state.bpm / state.song.tempo * 100;
+  if (pct >= state.trainer.target - 0.5) return;
+  setBpm(state.song.tempo * Math.min(state.trainer.target, pct + state.trainer.step) / 100);
 }
 
 /* ---------- Misc UI ---------- */
@@ -1350,6 +1427,37 @@ $("tempoSlider").addEventListener("change", e => e.target.blur()); // keep Space
 $("tempoUp").addEventListener("click", () => setBpm(state.bpm + 5));
 $("tempoDown").addEventListener("click", () => setBpm(state.bpm - 5));
 $("tempoReset").addEventListener("click", () => { if (state.song) setBpm(state.song.tempo); });
+
+$("trainerBtn").addEventListener("click", () => {
+  const pop = $("trainerPop");
+  if (pop.classList.contains("open")) { pop.classList.remove("open"); return; }
+  syncTrainerUI();
+  const r = $("trainerBtn").getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - 256, r.left - 20)) + "px";
+  pop.style.bottom = (window.innerHeight - r.top + 8) + "px";
+  pop.classList.add("open");
+});
+document.addEventListener("mousedown", e => {
+  const pop = $("trainerPop");
+  if (pop.classList.contains("open") && !pop.contains(e.target) &&
+      e.target !== $("trainerBtn")) pop.classList.remove("open");
+});
+$("trArm").addEventListener("click", () => {
+  state.trainer.armed ? disarmTrainer() : armTrainer();
+});
+$("trStart").addEventListener("change", e => {
+  state.trainer.start = Math.max(20, Math.min(100, +e.target.value || 60));
+  e.target.value = state.trainer.start; saveTrainerPrefs();
+});
+$("trStep").addEventListener("change", e => {
+  state.trainer.step = Math.max(1, Math.min(50, +e.target.value || 5));
+  e.target.value = state.trainer.step; saveTrainerPrefs();
+});
+$("trTarget").addEventListener("change", e => {
+  state.trainer.target = Math.max(30, Math.min(200, +e.target.value || 100));
+  e.target.value = state.trainer.target; saveTrainerPrefs();
+});
+syncTrainerUI();
 
 $("loopBtn").addEventListener("click", () => {
   if (state.loopSel) { clearSelectionLoop(); toast("Selection loop released"); return; }
