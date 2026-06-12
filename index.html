@@ -287,6 +287,8 @@
           <button class="ctl toggled" id="loopBtn" title="Loop the whole song">Loop ⟳</button>
           <span id="loopChip"><span id="loopChipText"></span><button id="loopChipClear" title="Release the part loop">✕</button></span>
           <button class="ctl" id="countBtn" title="Play one bar of clicks before starting">Count-in</button>
+          <button class="ctl" id="metroBtn" title="Metronome click on every beat during playback">Click</button>
+          <button class="ctl" id="muteBtn" title="Mute the guitar sound — focus bar and click keep going">Mute 🎸</button>
         </div>
         <div class="ctl-group" title="Volume">
           <span style="color:var(--muted);font-size:13px">🔊</span>
@@ -513,6 +515,7 @@ function parseBlock(rawLines, strumLine) {
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let ctx = null;
 let master = null;
+let guitarBus = null;
 
 function ensureAudio() {
   if (!ctx) {
@@ -529,6 +532,9 @@ function ensureAudio() {
     master.gain.value = state.volume / 100;
     master.connect(body); body.connect(shelf); shelf.connect(comp);
     comp.connect(ctx.destination);
+    guitarBus = ctx.createGain();
+    guitarBus.gain.value = state.muteGuitar ? 0 : 1;
+    guitarBus.connect(master);
   }
   if (ctx.state === "suspended") ctx.resume();
 }
@@ -606,7 +612,7 @@ function playNote(stringIdx, fret, when, velocity) {
   g.gain.linearRampToValueAtTime(velocity, when + 0.002);
   g.gain.setTargetAtTime(0, when + dur - 0.25, 0.06); // tail safety fade, buffer is near-silent by then
   src.connect(g);
-  g.connect(master);
+  g.connect(guitarBus);
   src.start(when);
   stringVoices[stringIdx] = { g, until: when + dur };
 }
@@ -622,7 +628,7 @@ function playMute(when) {
   f.type = "bandpass"; f.frequency.value = 900; f.Q.value = 1.2;
   const g = ctx.createGain();
   g.gain.value = 0.35;
-  src.connect(f); f.connect(g); g.connect(master);
+  src.connect(f); f.connect(g); g.connect(guitarBus);
   src.start(when);
 }
 
@@ -643,6 +649,8 @@ const state = {
   uiQueue: [],
   activeLib: null,
   countIn: localStorage.getItem("pa.countIn") !== "0",
+  metro: localStorage.getItem("pa.metro") === "1",
+  muteGuitar: localStorage.getItem("pa.muteGuitar") === "1",
   volume: +(localStorage.getItem("pa.volume") || 80),
   fontSize: +(localStorage.getItem("pa.fontSize") || 14),
   countInNodes: [],
@@ -726,6 +734,11 @@ function schedulerTick() {
     }
     const entry = state.timeline[state.stepIdx];
     if (!entry) { finishPlayback(); return; }
+    if (state.metro && state.measureStarts.length) {
+      const m = measureOfStep(state.stepIdx);
+      const off = state.stepIdx - state.measureStarts[m];
+      if (off % state.song.subdivision === 0) playTick(state.nextNoteTime, off === 0);
+    }
     scheduleStep(entry, state.nextNoteTime);
     state.nextNoteTime += stepDur();
     state.stepIdx++;
@@ -1290,6 +1303,21 @@ $("countBtn").addEventListener("click", e => {
   state.countIn = !state.countIn;
   localStorage.setItem("pa.countIn", state.countIn ? "1" : "0");
   e.currentTarget.classList.toggle("toggled", state.countIn);
+});
+
+$("metroBtn").classList.toggle("toggled", state.metro);
+$("metroBtn").addEventListener("click", e => {
+  state.metro = !state.metro;
+  localStorage.setItem("pa.metro", state.metro ? "1" : "0");
+  e.currentTarget.classList.toggle("toggled", state.metro);
+});
+
+$("muteBtn").classList.toggle("toggled", state.muteGuitar);
+$("muteBtn").addEventListener("click", e => {
+  state.muteGuitar = !state.muteGuitar;
+  localStorage.setItem("pa.muteGuitar", state.muteGuitar ? "1" : "0");
+  e.currentTarget.classList.toggle("toggled", state.muteGuitar);
+  if (guitarBus) guitarBus.gain.setTargetAtTime(state.muteGuitar ? 0 : 1, ctx.currentTime, 0.01);
 });
 
 $("volSlider").value = state.volume;
